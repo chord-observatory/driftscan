@@ -426,7 +426,8 @@ def airy_beam(
     out[x == 0] = 1
 
     if zero_over_horizon:
-        out[separations > np.pi / 2] = 0
+        horizon_mask = (separations <= np.pi / 2).astype(float)
+        out = out * horizon_mask
 
     out = out.reshape(out_shape)
 
@@ -676,7 +677,7 @@ class HEALPixBeamFile(config.Reader):
         elif self.freq_index_type == "nearest":
             abs_diffs = np.abs(tel_obj.frequencies[freq_ind] - beam_file.freq)
             ifreq = int(np.argmin(abs_diffs))
-            # TODO raise warning if abs_diffs[ifreq] passes some thresold.
+            # TODO raise warning if abs_diffs[ifreq] passes some threshold.
 
         beam = beam_file.beam[ifreq, ipol, ifeed, :]
 
