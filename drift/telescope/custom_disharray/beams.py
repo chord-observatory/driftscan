@@ -182,8 +182,8 @@ def rotate_thetaphi_beam(
     thph_amp_rot[:, 1] = hp_rot.rotate_map_alms(beam[:, 1].real)
 
     if np.iscomplexobj(beam):
-        thph_amp_rot[:, 0] += 1j * hp_rot.rotate_map_alms(beam[:, 0].real)
-        thph_amp_rot[:, 1] += 1j * hp_rot.rotate_map_alms(beam[:, 1].real)
+        thph_amp_rot[:, 0] += 1j * hp_rot.rotate_map_alms(beam[:, 0].imag)
+        thph_amp_rot[:, 1] += 1j * hp_rot.rotate_map_alms(beam[:, 1].imag)
 
     hp_logger.setLevel(level=global_log_level)
 
