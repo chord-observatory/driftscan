@@ -101,7 +101,7 @@ class GridLayout(config.Reader):
     def _finalise_config(self):
         n_dish = self.grid_ew * self.grid_ns
         d_ew = -self.spacing_ew * (np.arange(n_dish) % self.grid_ew)
-        d_ns = self.spacing_ns * (np.arange(n_dish) // self.grid_ns)
+        d_ns = self.spacing_ns * (np.arange(n_dish) // self.grid_ew)
 
         self.feedpositions = np.column_stack([d_ew, d_ns])
         self.polarisation = None
