@@ -194,10 +194,19 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
     beam_cache_size : float
         Size of the beam cache in MB. Setting this minimises the amount of recalculation
         of the primary beams while generating beam transfer matrices. Default is 200 MB.
+    force_lmax, force_mmax : int
+        Use specific values for the telescope's l_max and m_max, instead of computing
+        these values based on the angular scales accessible to the longest baseline
+        at the highest frequency. l_boost is ignored if these values are specified.
+        This is useful if you intend to combine several sets of beam transfer matrices 
+        that are separately computed over different frequency ranges. Default: None.
     """
 
     freq_lower = config.Property(proptype=float, default=None)
     freq_upper = config.Property(proptype=float, default=None)
+
+    force_lmax = config.Property(proptype=int, default=None)
+    force_mmax = config.Property(proptype=int, default=None)
 
     freq_start = config.Property(proptype=float, default=800.0)
     freq_end = config.Property(proptype=float, default=400.0)
@@ -473,7 +482,14 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
             self.baselines, self.wavelengths.min(), self.u_width, self.v_width
         )
         return int(np.ceil(lmax.max() * self.l_boost))
-
+            if self.force_lmax is not None:
+                return self.force_lmax
+            else:
+                lmax, mmax = max_lm(
+                    self.baselines, self.wavelengths.min(), self.u_width, self.v_width
+                )
+                return int(np.ceil(lmax.max() * self.l_boost))
+            
     @property
     def mmax(self):
         """The maximum m the telescope is sensitive to."""
@@ -481,6 +497,13 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
             self.baselines, self.wavelengths.min(), self.u_width, self.v_width
         )
         return int(np.ceil(mmax.max() * self.l_boost))
+         if self.force_mmax is not None:
+            return self.force_mmax
+        else:
+            lmax, mmax = max_lm(
+                self.baselines, self.wavelengths.min(), self.u_width, self.v_width
+            )
+            return int(np.ceil(mmax.max() * self.l_boost))
 
     # ===================================================
 
@@ -1240,6 +1263,8 @@ class PolarisedTelescope(TransitTelescope, metaclass=abc.ABCMeta):
 
     skip_V = config.Property(proptype=bool, default=False)
     skip_pol = config.Property(proptype=bool, default=False)
+    # Skipping frequency/baseline parameters
+    skip_pol_pair = config.list_type(type_=str, maxlength=4, default=[])
 
     _npol_sky_ = 4
 
@@ -1272,6 +1297,8 @@ class PolarisedTelescope(TransitTelescope, metaclass=abc.ABCMeta):
             cv_stokes = _construct_pol_real(beami, beamj, fringe, horizon)
 
         return cv_stokes
+
+    
 
     # ===== Implementations of abstract functions =======
 
