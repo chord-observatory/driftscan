@@ -1226,6 +1226,11 @@ class PolarisedTelescope(TransitTelescope, metaclass=abc.ABCMeta):
         be correctly calculated.  Only do this if you are *really* sure it's what you
         want.  The entries are left in the transfer matrices, but they will be filled
         with zeros.
+    skip_pol_pair : list
+        List of antenna polarisation pairs to skip. Valid entries are "XX", "XY", "YX"
+        or "YY". Like the skipped frequencies these pol pairs will have entries
+        generated but their beam transfer matrices are implicitly zero and thus not
+        calculated.
 
     Methods
     -------
