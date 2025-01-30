@@ -1,6 +1,6 @@
 import abc
 import logging
-
+from functools import cached_property
 import numpy as np
 
 from caput import cache
@@ -50,7 +50,6 @@ def map_half_plane(arr):
 
 
 def _merge_keyarray(keys1, keys2, mask1=None, mask2=None):
-
     tmask1 = mask1 if mask1 is not None else np.ones_like(keys1, dtype=bool)
     tmask2 = mask2 if mask2 is not None else np.ones_like(keys2, dtype=bool)
 
@@ -118,7 +117,7 @@ def max_lm(baselines, wavelengths, uwidth, vwidth=0.0):
     vmax = (np.abs(baselines[:, 1]) + vwidth) / wavelengths
 
     mmax = np.ceil(2 * np.pi * umax).astype(np.int64)
-    lmax = np.ceil((mmax ** 2 + (2 * np.pi * vmax) ** 2) ** 0.5).astype(np.int64)
+    lmax = np.ceil((mmax**2 + (2 * np.pi * vmax) ** 2) ** 0.5).astype(np.int64)
 
     return lmax, mmax
 
@@ -145,10 +144,10 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
         The center of the lowest and highest frequency bands. Deprecated, use
         `freq_start`, `freq_end` instead.
     freq_start, freq_end : scalar
-        The start and end frequencies in MHz.
+        The start and end frequencies in MHz. Defaults: 800, 400.
     num_freq : scalar
         The number of frequency bands (only use for setting up the frequency
-        binning). Generally using `nfreq` is preferred.
+        binning). Generally using `nfreq` is preferred. Default: 1024.
     freq_mode : {"centre", "edge"}
         Choose if `freq_start` and `freq_end` are the edges of the band
         ("edge"), or whether they are the central frequencies of the first
@@ -168,20 +167,33 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
         Default selects all channels.
     tsys_flat : scalar
         The system temperature (in K). Override `tsys` for anything more
-        sophisticated.
-    positive_m_only: boolean
-        Whether to only deal with half the `m` range. In many cases we are
-        much less sensitive to negative-m (depending on the hemisphere, and
-        baseline alignment). This does not affect the beams calculated, only
-        how they're used in further calculation. Default: False
+        sophisticated. Default: 50.
+    ndays : int
+        Number of days to assume when computing thermal noise. Default: 733.
+    accuracy_boost : float
+        When computing beam transfer function, increase nside of healpix maps by
+        2**accuracy_boost compared to default determination of nside. Default: 1.0.
+    l_boost: float
+        Increase lmax and mmax for telescope, and lmax/mmax values computed for
+        individual baselines, by a factor of l_boost compared to default computations.
+        Default: 1.0.
+    force_lmax, force_mmax : int
+        Use specific values for the telescope's l_max and m_max, instead of computing
+        these values based on the angular scales accessible to the longest baseline
+        at the highest frequency. l_boost is ignored if these values are specified.
+        This is useful if you intend to combine several sets of beam transfer matrices
+        that are separately computed over different frequency ranges. Default: None.
     minlength, maxlength : scalar
         Minimum and maximum baseline lengths to include (in metres).
+    auto_correlations : bool
+        Include elements for feed auto-correlations in computed beam transfer matrices.
+        Default: False.
     local_origin : bool
         If set the observers location is the terrestrial origin, and so the
         rotation angle corresponds to the right ascension that is overhead
         (Local Stellar Angle in `caput.time`). If not the origin is Greenwich,
         so the rotation angle is what is overhead at Greenwich (Earth Rotation
-        Angle).
+        Angle). Default: True.
     skip_freq : list
         Frequency indices (with the set of frequencies defined by the other parameters)
         to skip. Skipped frequencies are considered to be present, *but* their beam
@@ -214,6 +226,8 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
 
     accuracy_boost = config.Property(proptype=float, default=1.0)
     l_boost = config.Property(proptype=float, default=1.0)
+    force_lmax = config.Property(proptype=int, default=None)
+    force_mmax = config.Property(proptype=int, default=None)
 
     minlength = config.Property(proptype=float, default=0.0)
     maxlength = config.Property(proptype=float, default=1.0e7)
@@ -243,7 +257,6 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
     _pickle_keys = []
 
     def __getstate__(self):
-
         state = self.__dict__.copy()
 
         for key in self.__dict__:
@@ -324,7 +337,8 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
     @property
     def feedmap(self):
         """An (nfeed, nfeed) array giving the mapping between feedpairs and
-        the calculated baselines. Each entry is an index into the arrays of unique pairs."""
+        the calculated baselines. Each entry is an index into the arrays of unique pairs.
+        """
 
         if self._feedmap is None:
             self.calculate_feedpairs()
@@ -370,7 +384,6 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
         return self._frequencies
 
     def calculate_frequencies(self):
-
         if self.freq_lower or self.freq_upper:
             import warnings
 
@@ -397,7 +410,6 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
 
         # Rebin frequencies if needed
         if self.channel_bin > 1:
-
             if self.num_freq % self.channel_bin != 0:
                 raise ValueError(
                     "Channel binning must exactly divide the total number of channels"
@@ -469,18 +481,24 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
     @property
     def lmax(self):
         """The maximum l the telescope is sensitive to."""
-        lmax, mmax = max_lm(
-            self.baselines, self.wavelengths.min(), self.u_width, self.v_width
-        )
-        return int(np.ceil(lmax.max() * self.l_boost))
+        if self.force_lmax is not None:
+            return self.force_lmax
+        else:
+            lmax, mmax = max_lm(
+                self.baselines, self.wavelengths.min(), self.u_width, self.v_width
+            )
+            return int(np.ceil(lmax.max() * self.l_boost))
 
     @property
     def mmax(self):
         """The maximum m the telescope is sensitive to."""
-        lmax, mmax = max_lm(
-            self.baselines, self.wavelengths.min(), self.u_width, self.v_width
-        )
-        return int(np.ceil(mmax.max() * self.l_boost))
+        if self.force_mmax is not None:
+            return self.force_mmax
+        else:
+            lmax, mmax = max_lm(
+                self.baselines, self.wavelengths.min(), self.u_width, self.v_width
+            )
+            return int(np.ceil(mmax.max() * self.l_boost))
 
     # ===================================================
 
@@ -546,7 +564,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
         bl2 = np.around(bl1[..., 0] + 1.0j * bl1[..., 1], self._bl_tol)
 
         # Construct array of baseline lengths
-        blen = np.sum(bl1 ** 2, axis=-1) ** 0.5
+        blen = np.sum(bl1**2, axis=-1) ** 0.5
 
         # Create mask of included baselines
         mask = np.logical_and(blen >= self.minlength, blen <= self.maxlength)
@@ -692,7 +710,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
         """
         return bl_ind in self.skip_baselines
 
-    @cache.cached_property
+    @cached_property
     def included_freq(self) -> np.ndarray:
         """The frequency indices that *are* being calculated.
 
@@ -705,7 +723,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
             [ind for ind in range(self.nfreq) if not self._skip_freq(ind)], dtype=int
         )
 
-    @cache.cached_property
+    @cached_property
     def included_baseline(self) -> np.ndarray:
         """The baseline indices that *are* being calculated.
 
@@ -719,7 +737,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
             dtype=int,
         )
 
-    @cache.cached_property
+    @cached_property
     def included_pol(self) -> np.ndarray:
         """The pol indices that *are* being calculated.
 
@@ -791,14 +809,12 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
         tshape = bl_indices.shape + (self.num_pol_sky, lside + 1, 2 * lside + 1)
         logger.info(
             "Size: %i elements. Memory %f GB."
-            % (np.prod(tshape), 2 * np.prod(tshape) * 8.0 / 2 ** 30)
+            % (np.prod(tshape), 2 * np.prod(tshape) * 8.0 / 2**30)
         )
         tarray = np.zeros(tshape, dtype=np.complex128)
 
         # Sort the baselines by ascending lmax and iterate through in that
         # order, calculating the transfer matrices
-        i_arr = np.argsort(lmax.flat)
-
         for iflat in np.argsort(lmax.flat):
             ind = np.unravel_index(iflat, lmax.shape)
 
@@ -961,7 +977,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
 
     # ====== Properties to help with draco pipeline =====
 
-    @cache.cached_property
+    @cached_property
     def prodstack(self):
         """Generate the results of a prodstack.
 
@@ -980,7 +996,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
 
         return upairs.ravel().view(dtype)
 
-    @cache.cached_property
+    @cached_property
     def index_map_prod(self):
         """Generate a *full triangle* `index_map/prod` like object.
 
@@ -994,7 +1010,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
 
         return tpairs.T.flatten().view(dtype)
 
-    @cache.cached_property
+    @cached_property
     def index_map_stack(self):
         """Generate an `index_map/stack` like object.
 
@@ -1004,6 +1020,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
             A structured array with (prod_ind, conj) pairs the same length as
             `unique_pairs`.
         """
+
         # Taken from draco.util.tools.cmap, but we can't depend on it in driftscan
         # NOTE: garbage if i > j
         def ind2tri(i, j, n):
@@ -1020,7 +1037,7 @@ class TransitTelescope(config.Reader, ctime.Observer, metaclass=abc.ABCMeta):
 
         return stack_map
 
-    @cache.cached_property
+    @cached_property
     def reverse_map_stack(self):
         """Generate a `reverse_map/stack` like object.
 
@@ -1137,7 +1154,6 @@ class UnpolarisedTelescope(TransitTelescope, metaclass=abc.ABCMeta):
     # ===== Implementations of abstract functions =======
 
     def _beam_map_single(self, bl_index, f_index):
-
         # Get beam maps for each feed.
         feedi, feedj = self.uniquepairs[bl_index]
         beami, beamj = self._beam(feedi, f_index), self._beam(feedj, f_index)
@@ -1160,7 +1176,6 @@ class UnpolarisedTelescope(TransitTelescope, metaclass=abc.ABCMeta):
         return cvis
 
     def _transfer_single(self, bl_index, f_index, lmax, lside):
-
         if self._nside != hputil.nside_for_lmax(
             lmax, accuracy_boost=self.accuracy_boost
         ):
@@ -1251,7 +1266,6 @@ class PolarisedTelescope(TransitTelescope, metaclass=abc.ABCMeta):
         raise NotImplementedError("`polarisation` must be implemented.")
 
     def _beam_map_single(self, bl_index, f_index):
-
         # Get beam maps for each feed.
         feedi, feedj = self.uniquepairs[bl_index]
         beami, beamj = self._beam(feedi, f_index), self._beam(feedj, f_index)
@@ -1271,7 +1285,6 @@ class PolarisedTelescope(TransitTelescope, metaclass=abc.ABCMeta):
     # ===== Implementations of abstract functions =======
 
     def _transfer_single(self, bl_index, f_index, lmax, lside):
-
         if self._nside != hputil.nside_for_lmax(lmax):
             self._init_trans(hputil.nside_for_lmax(lmax))
 
@@ -1302,7 +1315,7 @@ class PolarisedTelescope(TransitTelescope, metaclass=abc.ABCMeta):
 
         return btrans
 
-    @cache.cached_property
+    @cached_property
     def included_pol(self) -> np.ndarray:
         """The included polarisation indices.
 
@@ -1374,7 +1387,7 @@ class SimplePolarisedTelescope(PolarisedTelescope, metaclass=abc.ABCMeta):
             One-dimensional array with the polarization for each feed ('X' or 'Y').
         """
         return np.asarray(
-            ["X" if feed % 2 == 0 else "Y" for feed in self.beamclass], dtype=np.str
+            ["X" if feed % 2 == 0 else "Y" for feed in self.beamclass], dtype=str
         )
 
     @property

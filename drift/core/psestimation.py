@@ -31,7 +31,6 @@ def uniform_band(k, kstart, kend):
 
 def bandfunc_2d_polar(ks, ke, ts, te):
     def band(k, mu):
-
         # k = (kpar**2 + kperp**2)**0.5
         theta = np.arccos(mu)
 
@@ -45,9 +44,8 @@ def bandfunc_2d_polar(ks, ke, ts, te):
 
 def bandfunc_2d_cart(kpar_s, kpar_e, kperp_s, kperp_e):
     def band(k, mu):
-
         kpar = k * mu
-        kperp = k * (1.0 - mu ** 2) ** 0.5
+        kperp = k * (1.0 - mu**2) ** 0.5
 
         parb = (kpar >= kpar_s) * (kpar <= kpar_e)
         perpb = (kperp >= kperp_s) * (kperp < kperp_e)
@@ -58,7 +56,6 @@ def bandfunc_2d_cart(kpar_s, kpar_e, kperp_s, kperp_e):
 
 
 def range_config(lst):
-
     lst2 = []
 
     endpoint = False
@@ -268,7 +265,6 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
 
         # Create different sets of bands depending on whether we're using polar bins or not.
         if self.bandtype == "polar":
-
             # Create the array of band bounds
             self.theta_bands = np.linspace(
                 0.0, np.pi / 2.0, self.num_theta + 1, endpoint=True
@@ -308,7 +304,6 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
                 self.band_power = cr.ps_vv(self.k_center)
 
         elif self.bandtype == "cartesian":
-
             # Broadcast the bounds against each other to make the 2D array of bands
             kparb, kperpb = np.broadcast_arrays(
                 self.kpar_bands[np.newaxis, :], self.kperp_bands[:, np.newaxis]
@@ -327,7 +322,7 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
                 zip(self.kpar_start, self.kpar_end, self.kperp_start, self.kperp_end)
             )
 
-            self.k_center = (self.kpar_center ** 2 + self.kperp_center ** 2) ** 0.5
+            self.k_center = (self.kpar_center**2 + self.kperp_center**2) ** 0.5
 
             # Make a list of functions of the band window functions
             self.band_func = [bandfunc_2d_cart(*bound) for bound in bounds]
@@ -349,7 +344,6 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
 
         # Use new parallel map to speed up computaiton of bands
         if self.clarray is None:
-
             self.make_clzz_array()
 
         logger.info("Done.")
@@ -384,7 +378,6 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
         return clzz
 
     def make_clzz_array(self):
-
         p_bands, s_bands, e_bands = mpiutil.split_all(self.nbands)
         p, s, e = mpiutil.split_local(self.nbands)
 
@@ -521,7 +514,7 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
             # Check to see ensure that Fisher matrix isn't all zeros.
             if not (self.fisher == 0).all():
                 # Generate derived quantities (covariance, errors..)
-                cv = la.pinv(self.fisher, rcond=1e-8)
+                cv = la.pinv(self.fisher, atol=1e-8)
                 err = cv.diagonal() ** 0.5
                 cr = cv / np.outer(err, err)
             else:
@@ -530,7 +523,7 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
                 cr = np.zeros_like(self.fisher)
 
             f = h5py.File(self.psdir + "/fisher.hdf5", "w")
-            f.attrs["bandtype"] = np.string_(self.bandtype)  # HDF5 string issues
+            f.attrs["bandtype"] = np.bytes_(self.bandtype)  # HDF5 string issues
 
             f.create_dataset("fisher", data=self.fisher)
             f.create_dataset("bias", data=self.bias)
@@ -553,7 +546,6 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
                 f.create_dataset("theta_bands", data=self.theta_bands)
 
             elif self.bandtype == "cartesian":
-
                 f.create_dataset("kpar_start", data=self.kpar_start)
                 f.create_dataset("kpar_end", data=self.kpar_end)
                 f.create_dataset("kpar_center", data=self.kpar_center)
@@ -580,9 +572,7 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
         return h5py.File(self.psdir + "fisher.hdf5", "r")
 
     def fisher_bias(self):
-
         with h5py.File(self.psdir + "/fisher.hdf5", "r") as f:
-
             return f["fisher"][:], f["bias"][:]
 
     # ===================================================
@@ -639,9 +629,7 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
 
         # Calculate q_a for each band
         for bi in range(self.nbands):
-
             for li in range(lside):
-
                 lxvec = x2[:, 0, li]
                 lyvec = y2[:, 0, li]
 
@@ -649,13 +637,12 @@ class PSEstimation(config.Reader, metaclass=abc.ABCMeta):
                     lyvec.conj()
                     * np.dot(self.clarray[bi][li].astype(np.complex128), lxvec),
                     axis=0,
-                ).astype(
+                ).real.astype(
                     np.float64
                 )  # TT only.
 
         # Calculate q_a for noise power (x0^H N x0 = |x0|^2)
         if noise:
-
             # If calculating crosspower don't include instrumental noise
             noisemodes = 0.0 if self.crosspower else 1.0
             noisemodes = noisemodes + (evals if self.zero_mean else 0.0)
@@ -751,7 +738,6 @@ class PSExact(PSEstimation):
             self._bp_cache = []
 
         for i in range(len(self.clarray)):
-
             fn = self._cfile % (mi, i)
             if os.path.exists(fn):
                 logger.info("Deleting cache file:" + fn)
@@ -817,11 +803,11 @@ class PSExact(PSEstimation):
 
         for ia in range(self.nbands):
             c_a = self.getproj(mi, ia)
-            fisher[ia, ia] = np.sum(c_a * c_a.T * ci ** 2)
+            fisher[ia, ia] = np.sum(c_a * c_a.T * ci**2)
 
             for ib in range(ia):
                 c_b = self.getproj(mi, ib)
-                fisher[ia, ib] = np.sum(c_a * c_b.T * ci ** 2)
+                fisher[ia, ib] = np.sum(c_a * c_b.T * ci**2)
                 fisher[ib, ia] = np.conj(fisher[ia, ib])
 
         self.delproj(mi)
